@@ -51,11 +51,18 @@ static void install(void) {
     VirtualProtect(t, 6, old, &old); FlushInstructionCache(GetCurrentProcess(), t, 6);
     logmsg("ObsFix v1: observer slot lookup cached for %lu ms (patched %08X)", g_ttl, FN_SLOT_INDEX);
 }
+// one copy per game process: a patch can come both from Elite_DLLs (launcher) and from dow2-patches\ (winmm loader)
+static int already_loaded(const char *name) {
+    char n[96]; wsprintfA(n, "Local\\dow2patch_%s_%lu", name, GetCurrentProcessId());
+    HANDLE m = CreateMutexA(NULL, FALSE, n);
+    return m && GetLastError() == ERROR_ALREADY_EXISTS;
+}
 BOOL WINAPI DllMain(HINSTANCE h, DWORD reason, LPVOID _) {
     if (reason != DLL_PROCESS_ATTACH) return TRUE;
     DisableThreadLibraryCalls(h);
     GetModuleFileNameW(h, g_log, MAX_PATH); wchar_t *sl = wcsrchr(g_log, L'\\'); if (sl) sl[1] = 0; else g_log[0] = 0;
     wchar_t ini[MAX_PATH]; wcscpy(ini, g_log); wcscat(ini, L"ObsFix.ini"); wcscat(g_log, L"ObsFix.log");
+    if (already_loaded("ObsFix")) { logmsg("another ObsFix copy is already active in this game, this one stays idle"); return TRUE; }
     if (!GetPrivateProfileIntW(L"ObsFix", L"Enabled", 1, ini)) { logmsg("disabled in ObsFix.ini"); return TRUE; }
     g_ttl = GetPrivateProfileIntW(L"ObsFix", L"CacheMs", 500, ini);
     install();

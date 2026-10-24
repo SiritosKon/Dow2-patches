@@ -1,7 +1,7 @@
 // winmm.dll - shim for VANILLA DoW2: Retribution. All calls are forwarded to the system winmm.dll,
-// and when launched without -modname (vanilla) it additionally loads every patch DLL from <game>\dow2-patches\ (and the older LobbyStats\LobbyStats.dll).
-// Game files are not modified: Steam leaves an extra file in the folder alone. In Elite (-modname present) the shim loads nothing -
-// there Elite loads its patch DLLs itself.
+// and it also loads every patch DLL from <game>\dow2-patches\ (and the older LobbyStats\LobbyStats.dll), in vanilla and in Elite.
+// Game files are not modified: Steam leaves an extra file in the folder alone. If Elite already loaded the same patch from
+// Elite_DLLs, the second copy notices it and stays idle.
 #include <windows.h>
 #include <string.h>
 #include <stdio.h>
@@ -205,11 +205,6 @@ __asm__(".text\n"
   ".globl _stub_192\n_stub_192: jmp *_g_fn+768\n"
 );
 
-static int has_modname(void) {
-    const char *cl = GetCommandLineA(); char buf[1024]; int n = 0;
-    for (; cl[n] && n < 1023; n++) buf[n] = (cl[n] >= 'A' && cl[n] <= 'Z') ? cl[n] + 32 : cl[n];
-    buf[n] = 0; return strstr(buf, "-modname") != NULL;
-}
 static int ends_with_dll(const wchar_t *n) {              // the real extension, not just ".dll" somewhere in the name
     size_t l = wcslen(n); return l > 4 && !_wcsicmp(n + l - 4, L".dll");
 }
@@ -241,6 +236,6 @@ BOOL WINAPI DllMain(HINSTANCE h, DWORD reason, LPVOID _) {
     char sys[MAX_PATH]; GetSystemDirectoryA(sys, MAX_PATH); strcat(sys, "\\winmm.dll");
     HMODULE real = LoadLibraryA(sys); if (!real) return FALSE;
     for (int i = 0; i < N; i++) g_fn[i] = (void *)GetProcAddress(real, NAMES[i]);
-    if (!has_modname()) CloseHandle(CreateThread(NULL, 0, load_stats, NULL, 0, NULL));
+    CloseHandle(CreateThread(NULL, 0, load_stats, NULL, 0, NULL));   // vanilla and Elite; each patch refuses to load twice
     return TRUE;
 }

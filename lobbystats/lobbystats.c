@@ -910,6 +910,12 @@ static void install(void) {
     } else if (g_ui) { g_ui = 0; logmsg("fscommand handler not recognised, no filter lists in Game Setup"); }
 }
 
+// one copy per game process: a patch can come both from Elite_DLLs (launcher) and from dow2-patches\ (winmm loader)
+static int already_loaded(const char *name) {
+    char n[96]; wsprintfA(n, "Local\\dow2patch_%s_%lu", name, GetCurrentProcessId());
+    HANDLE m = CreateMutexA(NULL, FALSE, n);
+    return m && GetLastError() == ERROR_ALREADY_EXISTS;
+}
 BOOL WINAPI DllMain(HINSTANCE h, DWORD reason, LPVOID _) {
     if (reason != DLL_PROCESS_ATTACH) return TRUE;
     DisableThreadLibraryCalls(h);
@@ -946,6 +952,7 @@ BOOL WINAPI DllMain(HINSTANCE h, DWORD reason, LPVOID _) {
 #else
     logmsg("LobbyStats v0.6.17");
 #endif
+    if (already_loaded("LobbyStats")) { logmsg("another LobbyStats copy is already active in this game, this one stays idle"); return TRUE; }
     load_cache(); install();
     if (G.enabled) logmsg("guard: on, dry-run=%d, rating %d..%d, win rate %d..%d%%, min games=%d hours=%d, kick unknown=%d, delay=%ds",
                           G.dryRun, G.minRating, G.maxRating, G.minWinRate, G.maxWinRate, G.minGames, G.minHours, G.kickUnknown, G.delaySec);
