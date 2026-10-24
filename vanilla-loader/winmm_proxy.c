@@ -1,9 +1,11 @@
 // winmm.dll — shim for VANILLA DoW2: Retribution. All calls are forwarded to the system winmm.dll,
-// and when launched without -modname (vanilla) it additionally loads LobbyStats\\LobbyStats.dll from the game folder.
+// and when launched without -modname (vanilla) it additionally loads every patch DLL from <game>\dow2-patches\ (and the older LobbyStats\LobbyStats.dll).
 // Game files are not modified: Steam leaves an extra file in the folder alone. In Elite (-modname present) the shim loads nothing —
-// there Elite loads LobbyStats itself.
+// there Elite loads its patch DLLs itself.
 #include <windows.h>
 #include <string.h>
+#include <stdio.h>
+#include <wchar.h>
 #define N 193
 void *g_fn[N];
 static const char *NAMES[N] = {"CloseDriver","DefDriverProc","DriverCallback","DrvGetModuleHandle","GetDriverModuleHandle","NotifyCallbackData","OpenDriver","PlaySound","PlaySoundA","PlaySoundW","SendDriverMessage","WOW32DriverCallback","WOW32ResolveMultiMediaHandle","WOWAppExit","aux32Message","auxGetDevCapsA","auxGetDevCapsW","auxGetNumDevs","auxGetVolume","auxOutMessage","auxSetVolume","joy32Message","joyConfigChanged","joyGetDevCapsA","joyGetDevCapsW","joyGetNumDevs","joyGetPos","joyGetPosEx","joyGetThreshold","joyReleaseCapture","joySetCapture","joySetThreshold","mci32Message","mciDriverNotify","mciDriverYield","mciExecute","mciFreeCommandResource","mciGetCreatorTask","mciGetDeviceIDA","mciGetDeviceIDFromElementIDA","mciGetDeviceIDFromElementIDW","mciGetDeviceIDW","mciGetDriverData","mciGetErrorStringA","mciGetErrorStringW","mciGetYieldProc","mciLoadCommandResource","mciSendCommandA","mciSendCommandW","mciSendStringA","mciSendStringW","mciSetDriverData","mciSetYieldProc","mid32Message","midiConnect","midiDisconnect","midiInAddBuffer","midiInClose","midiInGetDevCapsA","midiInGetDevCapsW","midiInGetErrorTextA","midiInGetErrorTextW","midiInGetID","midiInGetNumDevs","midiInMessage","midiInOpen","midiInPrepareHeader","midiInReset","midiInStart","midiInStop","midiInUnprepareHeader","midiOutCacheDrumPatches","midiOutCachePatches","midiOutClose","midiOutGetDevCapsA","midiOutGetDevCapsW","midiOutGetErrorTextA","midiOutGetErrorTextW","midiOutGetID","midiOutGetNumDevs","midiOutGetVolume","midiOutLongMsg","midiOutMessage","midiOutOpen","midiOutPrepareHeader","midiOutReset","midiOutSetVolume","midiOutShortMsg","midiOutUnprepareHeader","midiStreamClose","midiStreamOpen","midiStreamOut","midiStreamPause","midiStreamPosition","midiStreamProperty","midiStreamRestart","midiStreamStop","mixerClose","mixerGetControlDetailsA","mixerGetControlDetailsW","mixerGetDevCapsA","mixerGetDevCapsW","mixerGetID","mixerGetLineControlsA","mixerGetLineControlsW","mixerGetLineInfoA","mixerGetLineInfoW","mixerGetNumDevs","mixerMessage","mixerOpen","mixerSetControlDetails","mmDrvInstall","mmGetCurrentTask","mmTaskBlock","mmTaskCreate","mmTaskSignal","mmTaskYield","mmioAdvance","mmioAscend","mmioClose","mmioCreateChunk","mmioDescend","mmioFlush","mmioGetInfo","mmioInstallIOProcA","mmioInstallIOProcW","mmioOpenA","mmioOpenW","mmioRead","mmioRenameA","mmioRenameW","mmioSeek","mmioSendMessage","mmioSetBuffer","mmioSetInfo","mmioStringToFOURCCA","mmioStringToFOURCCW","mmioWrite","mmsystemGetVersion","mod32Message","mxd32Message","sndPlaySoundA","sndPlaySoundW","tid32Message","timeBeginPeriod","timeEndPeriod","timeGetDevCaps","timeGetSystemTime","timeGetTime","timeKillEvent","timeSetEvent","waveInAddBuffer","waveInClose","waveInGetDevCapsA","waveInGetDevCapsW","waveInGetErrorTextA","waveInGetErrorTextW","waveInGetID","waveInGetNumDevs","waveInGetPosition","waveInMessage","waveInOpen","waveInPrepareHeader","waveInReset","waveInStart","waveInStop","waveInUnprepareHeader","waveOutBreakLoop","waveOutClose","waveOutGetDevCapsA","waveOutGetDevCapsW","waveOutGetErrorTextA","waveOutGetErrorTextW","waveOutGetID","waveOutGetNumDevs","waveOutGetPitch","waveOutGetPlaybackRate","waveOutGetPosition","waveOutGetVolume","waveOutMessage","waveOutOpen","waveOutPause","waveOutPrepareHeader","waveOutReset","waveOutRestart","waveOutSetPitch","waveOutSetPlaybackRate","waveOutSetVolume","waveOutUnprepareHeader","waveOutWrite","wid32Message","winmmSetDebugLevel","wod32Message"};
@@ -208,12 +210,29 @@ static int has_modname(void) {
     for (; cl[n] && n < 1023; n++) buf[n] = (cl[n] >= 'A' && cl[n] <= 'Z') ? cl[n] + 32 : cl[n];
     buf[n] = 0; return strstr(buf, "-modname") != NULL;
 }
+static int ends_with_dll(const wchar_t *n) {              // the real extension, not just ".dll" somewhere in the name
+    size_t l = wcslen(n); return l > 4 && !_wcsicmp(n + l - 4, L".dll");
+}
 static DWORD WINAPI load_stats(LPVOID _) {
-    wchar_t p[MAX_PATH]; GetModuleFileNameW(NULL, p, MAX_PATH);
-    wchar_t *sl = wcsrchr(p, L'\\'); if (!sl) return 0;
+    wchar_t dir[MAX_PATH]; GetModuleFileNameW(NULL, dir, MAX_PATH);
+    wchar_t *sl = wcsrchr(dir, L'\\'); if (!sl) return 0;
     if (_wcsicmp(sl + 1, L"DOW2.exe")) return 0;                     // only the game itself
-    wcscpy(sl + 1, L"LobbyStats\\LobbyStats.dll");
-    if (GetFileAttributesW(p) != INVALID_FILE_ATTRIBUTES) LoadLibraryW(p);
+    sl[1] = 0;
+    // every *.dll in <game>\dow2-patches\ (ObsFix, LobbyStats, ...)
+    wchar_t pat[MAX_PATH], p[MAX_PATH]; WIN32_FIND_DATAW fd;
+    _snwprintf(pat, MAX_PATH, L"%lsdow2-patches\\*.dll", dir);
+    HANDLE h = FindFirstFileW(pat, &fd);
+    if (h != INVALID_HANDLE_VALUE) {
+        do {
+            if ((fd.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) || !ends_with_dll(fd.cFileName)) continue;
+            _snwprintf(p, MAX_PATH, L"%lsdow2-patches\\%ls", dir, fd.cFileName);
+            LoadLibraryW(p);
+        } while (FindNextFileW(h, &fd));
+        FindClose(h);
+    }
+    // older layout: <game>\LobbyStats\LobbyStats.dll
+    _snwprintf(p, MAX_PATH, L"%lsLobbyStats\\LobbyStats.dll", dir);
+    if (GetFileAttributesW(p) != INVALID_FILE_ATTRIBUTES && !GetModuleHandleW(L"LobbyStats.dll")) LoadLibraryW(p);
     return 0;
 }
 BOOL WINAPI DllMain(HINSTANCE h, DWORD reason, LPVOID _) {

@@ -10,7 +10,7 @@ Build everything: `make` (needs `gcc-mingw-w64-i686`). GitHub Actions builds eve
 |---|---|---|
 | `obsfix/` | **Observer lag fix.** Caches the observer's "which slot am I" lookup, which rebuilt the whole match info dozens of times per frame. See [docs/OBSERVER_LAG.md](docs/OBSERVER_LAG.md). | `i686-w64-mingw32-gcc -O2 -shared -o ObsFix.dll obsfix.c -static-libgcc` |
 | `lobbystats/` | **Lobby stats.** Relic rating next to names and a stats tooltip. The full build also has an optional host filter and kick. Lite build = tooltip + rating only. | full: `i686-w64-mingw32-gcc -O2 -shared -o LobbyStats.dll lobbystats.c -lwinhttp -lpsapi -static-libgcc -Wl,--kill-at` — lite: add `-DLITE` |
-| `vanilla-loader/` | `winmm.dll` proxy that loads LobbyStats in vanilla (no Elite). Forwards all 193 winmm exports to the system DLL; does nothing when `-modname` is on the command line. | `i686-w64-mingw32-gcc -O2 -shared -o winmm.dll winmm_proxy.c winmm.def -static-libgcc` |
+| `vanilla-loader/` | `winmm.dll` loader for vanilla (no Elite): forwards all 193 winmm exports to the system DLL and loads every `*.dll` from `<game>\dow2-patches\` (ObsFix, LobbyStats, ...). Does nothing when `-modname` is on the command line (Elite loads its own DLLs). | `i686-w64-mingw32-gcc -O2 -shared -o winmm.dll winmm_proxy.c winmm.def -static-libgcc` |
 | `frameprobe/` | **Diagnostics** used to find the observer lag: frame times, sim ticks, a stack sampler of the game-loop thread, a Continue-button probe. | `i686-w64-mingw32-gcc -O2 -shared -o FrameProbe.dll frameprobe.c -lpsapi -lwinmm -static-libgcc` |
 
 The launcher (Rust/Tauri, MIT) lives in its own repository, `elite-launcher`.
