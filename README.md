@@ -22,9 +22,9 @@ lobbystats/
     and doesn't touch the game's netcode.
 
 vanilla-loader/
-    winmm.dll for the game without Elite. Forwards everything to the real winmm.dll and loads every
-    *.dll from <game>\dow2-patches\. Does nothing when -modname is on the command line, since Elite
-    loads its own DLLs.
+    winmm.dll loader. Forwards everything to the real winmm.dll and loads every *.dll from
+    <game>\dow2-patches\, in vanilla and in Elite. Each patch refuses to load twice, so having the same
+    DLL in Elite_DLLs as well is fine.
 
 frameprobe/
     The diagnostics DLL I used to find the observer lag: frame times, sim ticks, a stack sampler on the
