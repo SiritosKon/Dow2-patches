@@ -19,7 +19,14 @@ lobbystats/
     The full build also has an optional host filter (!filter in lobby chat, two dropdowns in Game Setup).
     -DLITE builds only the rating/tooltip part. Data comes from a small web service that reads the public
     Relic API (host: STATS_HOST at build time, or Server= in LobbyStats.ini). It runs in its own thread
-    and doesn't touch the game's netcode.
+    and doesn't touch the game's netcode. For the host it also brings back the referee button (the
+    orange hammer on observer rows) that the stock lobby hides; the "Referee" mark is host-side only,
+    the engine no longer sends or uses it.
+
+reinforcefix/
+    Auto-reinforce is lost when a squad goes through an Eldar webway gate. The auto-reinforce list is
+    kept by the HUD and every tick it drops squads that have no models on the map, which is the case
+    while a squad sits inside the gate. ReinforceFix skips such squads instead of dropping them.
 
 vanilla-loader/
     winmm.dll loader. Forwards everything to the real winmm.dll and loads every *.dll from
