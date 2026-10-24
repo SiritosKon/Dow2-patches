@@ -49,7 +49,7 @@ static Entry g_cache[MAX_ENTRIES]; static int g_ncache;
 static CRITICAL_SECTION g_lock; static HANDLE g_wake;
 static wchar_t g_pending[16][64]; static int g_npending;
 static wchar_t g_dir[MAX_PATH];
-static volatile int g_fresh; static volatile int g_uiRefill; static int g_logFs; static int g_pollFrames; static DWORD g_lobbyFsTick; static unsigned char g_refMark[16], g_slotType[16];   // referee marks per lobby slot, slot types (see ref_flag)                                 // new data arrived from the server - recheck the lobby
+static volatile int g_fresh; static volatile int g_uiRefill; static int g_logFs; static int g_pollFrames; static DWORD g_lobbyFsTick;                                 // new data arrived from the server - recheck the lobby
 static int g_showInName = 1, g_stats = 1;                  // g_stats=0: leave names and tooltips alone (the filter still works)
 
 static void logmsg(const char *fmt, ...) {
@@ -649,7 +649,6 @@ static void ui_setup(void *self) {
         snprintf(p, sizeof p, "%s.g_dropDownBoxes.length", g_panel);
         if (!as_num(movie, p, &nb)) { logmsg("ui: g_dropDownBoxes not found in %s", g_panel); g_base = -1; return; }
         g_base = (int)nb;
-        memset(g_refMark, 0, sizeof g_refMark);              // new lobby - no referees yet
         for (int k = 0; k < NBOX; k++) {                      // create the upper one first: the lower one's list opens over it
             char nm[32], path[300]; snprintf(nm, sizeof nm, "lsf_dd%d", k); snprintf(path, sizeof path, "%s.%s", g_panel, nm);
             as_fn(movie, "Receive_DuplicateMovieClip", "ss", "resources_dropdown_mc", nm);
@@ -694,94 +693,6 @@ static void ui_poll(void *movie) {
         as_fn(g_uiMovie, "Receive_SetMovieClipY", "sn", nm, open ? -5000.0 : g_ddY[b]);
     }
 }
-// the player list lives next to the settings panel: ...panel_mc.player_list_panel_mc
-static int pl_path(char *out, size_t n) {
-    const char *q = strstr(g_panel, "game_options_panel_mc"); if (!q) return 0;
-    snprintf(out, n, "%.*splayer_list_panel_mc", (int)(q - g_panel), g_panel); return 1;
-}
-static int as_bool(void *movie, const char *path) { GFxValue v; return as_get(movie, path, &v) && v.type == GFX_BOOL && v.v.b; }
-// row index in the observer list -> lobby slot (ConvertObserverIndexToSlotIndex in player_list_panel)
-static int obs_slot(void *movie, const char *pl, int i) {
-    char p[400]; double per = 3, maxp = 6;
-    snprintf(p, sizeof p, "%s.g_playersPerTeam", pl); as_num(movie, p, &per);
-    snprintf(p, sizeof p, "%s.g_scenarioMaxPlayers", pl); as_num(movie, p, &maxp);
-    snprintf(p, sizeof p, "%s.g_isFFASolo", pl); int ffa = as_bool(movie, p);
-    snprintf(p, sizeof p, "%s.g_isFFATeam", pl); ffa |= as_bool(movie, p);
-    if (ffa) return (int)maxp + i;
-    int half = (8 - (int)per * 2) / 2;
-    return i >= half ? i - half + 4 + (int)per : i + (int)per;
-}
-// the frontend movie is kept alive while we use it from the frame hook (one reference, dropped when the lobby is gone)
-static void *g_refMovie;
-static void ref_drop(void) {
-    if (!g_refMovie) return;
-    LONG *rc = (LONG *)((char *)g_refMovie + 4);
-    if (*rc > 1) InterlockedDecrement(rc);                  // if we are the last owner, leak it rather than free it here
-    g_refMovie = NULL;
-}
-static void ref_hold(void *movie) {
-    if (movie == g_refMovie) return;
-    ref_drop();
-    if (IsBadWritePtr((char *)movie + 4, 4)) return;
-    LONG rc = *(LONG *)((char *)movie + 4);
-    if (rc <= 0 || rc > 10000) { static int n; if (n++ < 3) logmsg("referee: unexpected movie refcount %ld, button off", rc); return; }
-    InterlockedIncrement((LONG *)((char *)movie + 4)); g_refMovie = movie;
-    logmsg("referee: holding the lobby movie (refcount was %ld)", rc);
-}
-// hammer look: the button clip has state layers (up / toggled_on / over / down) that nothing switches now
-static void ref_paint(void *movie, const char *row, int on) {
-    static const char *layer[] = {"up", "over", "down", "toggled_on"};
-    char p[420];
-    for (int k = 0; k < 4; k++) {
-        snprintf(p, sizeof p, "%s.ref_btn.%s", row, layer[k]);
-        as_fn(movie, "Receive_SetVisible", "sb", p, k == 0 ? !on : k == 3 ? on : 0);
-    }
-}
-static void ref_show(void *movie) {
-    char pl[300], p[400]; if (!pl_path(pl, sizeof pl)) return;
-    snprintf(p, sizeof p, "%s.observer_list_panel_mc.observer_00_mc._y", pl);
-    double d; if (!as_num(movie, p, &d)) return;
-    for (int i = 0; i < 6; i++) {
-        char row[360]; snprintf(row, sizeof row, "%s.observer_list_panel_mc.observer_%02d_mc", pl, i);
-        snprintf(p, sizeof p, "%s.ref_btn", row);
-        as_fn(movie, "Receive_SetVisible", "sb", p, g_isHost);
-        int slot = obs_slot(movie, pl, i);
-        if (g_isHost) ref_paint(movie, row, slot >= 0 && slot < 16 && g_refMark[slot]);
-    }
-    if (g_isHost) ref_hold(movie); else ref_drop();
-}
-// frame hook: a left click on a visible hammer toggles the mark of that observer slot
-static void ref_click_poll(void) {
-    static int down;
-    int now = (GetAsyncKeyState(VK_LBUTTON) & 0x8000) != 0, press = now && !down;
-    down = now;
-    if (!press || !g_refMovie || !g_isHost || !g_panel[0]) return;
-    DWORD pid = 0; GetWindowThreadProcessId(GetForegroundWindow(), &pid); if (pid != GetCurrentProcessId()) return;
-    void *movie = g_refMovie; char pl[300], p[400], row[360];
-    if (!pl_path(pl, sizeof pl)) return;
-    snprintf(p, sizeof p, "%s.observer_list_panel_mc.observer_00_mc._y", pl);
-    double d; if (!as_num(movie, p, &d)) { ref_drop(); return; }   // lobby is gone
-    for (int i = 0; i < 6; i++) {
-        double x, y, w, h;
-        snprintf(row, sizeof row, "%s.observer_list_panel_mc.observer_%02d_mc", pl, i);
-        snprintf(p, sizeof p, "%s._visible", row); if (!as_bool(movie, p)) continue;
-        snprintf(p, sizeof p, "%s.ref_btn._visible", row); if (!as_bool(movie, p)) continue;
-        snprintf(p, sizeof p, "%s.ref_btn._xmouse", row); if (!as_num(movie, p, &x)) continue;
-        snprintf(p, sizeof p, "%s.ref_btn._ymouse", row); if (!as_num(movie, p, &y)) continue;
-        snprintf(p, sizeof p, "%s.ref_btn._width", row); if (!as_num(movie, p, &w)) continue;
-        snprintf(p, sizeof p, "%s.ref_btn._height", row); if (!as_num(movie, p, &h)) continue;
-        if (g_logFs) logmsg("referee: row %d mouse %.0f,%.0f size %.0fx%.0f", i, x, y, w, h);
-        if (x < 0 || y < 0 || x > w || y > h) continue;
-        int slot = obs_slot(movie, pl, i);
-        if (slot < 0 || slot > 15 || g_slotType[slot] != 5) { logmsg("referee: row %d (slot %d) has nobody in it", i, slot); return; }
-        g_refMark[slot] ^= 1;
-        snprintf(p, sizeof p, "%s.referee_txt", row);
-        as_fn(movie, "Receive_SetVisible", "sb", p, g_refMark[slot]);
-        ref_paint(movie, row, g_refMark[slot]);
-        logmsg("referee: slot %d %s", slot, g_refMark[slot] ? "marked" : "unmarked");
-        return;
-    }
-}
 static void ui_host_changed(void *self) {
     if (g_base < 0 || !g_panel[0] || IsBadReadPtr(self, 0x2C)) return;
     char *holder = *(char **)((char *)self + 0x28); if (!holder || IsBadReadPtr(holder, 8)) return;
@@ -793,7 +704,6 @@ static void ui_host_changed(void *self) {
         as_fn(movie, "Receive_SetDropDownVisible", "nb", (double)(g_base + b), g_isHost);
         as_fn(movie, "Receive_SetVisible", "sb", nm, g_isHost);
     }
-    ref_show(movie);
 }
 static void ui_select(int box, int item) {
     if (box == 0 && item < COUNT(RATING)) { G.minRating = RATING[item].min; G.maxRating = RATING[item].max; }
@@ -948,7 +858,6 @@ static void __stdcall frame_hook(float dt) {
     // the !filter command comes from the chat movie - update the menu via the lobby movie if it is alive (lobby action < 20 s ago)
     if (g_uiRefill && g_uiMovie && g_base >= 0 && GetTickCount() - g_lobbyFsTick < 20000 && !g_pollFrames) g_pollFrames = 1;
     if (g_pollFrames > 0 && g_uiMovie) { g_pollFrames--; ui_poll(g_uiMovie); }
-    ref_click_poll();
 }
 static void hook_frame(void) {
     HMODULE m = GetModuleHandleA("Shark.dll"); MODULEINFO mi; DWORD old;
@@ -959,34 +868,6 @@ static void hook_frame(void) {
     g_updOrig = (UpdFn)cur; *(DWORD *)IAT_SHARK_UPDATE = (DWORD)frame_hook;
     VirtualProtect((void *)IAT_SHARK_UPDATE, 4, old, &old);
     logmsg("frame hook installed");
-}
-
-// Referee. The observer rows in the lobby Flash still have the referee button (orange hammer, ref_btn) and
-// the "Referee" label (referee_txt), but both are hidden and the button has no handler. The engine side is
-// cut too: InvokePopulatePlayerList pushes m_isReferee as a constant false (xor al,al @ 0x4917C6) and the
-// slot's referee byte (+0x54) is never set. We show the button to the host, catch clicks on it ourselves and
-// keep the mark per slot; the patched push makes the list draw the label. The mark is local to the host.
-#define REF_PATCH 0x004917C6
-static const unsigned char REF_ORIG[10] = {0x32, 0xC0, 0x8D, 0x4D, 0xCC, 0xE8, 0xB5, 0xFF, 0xFC, 0xFF};
-__attribute__((used)) int ref_flag(const int *slot) {
-    if (IsBadReadPtr(slot, 0xA0)) return 0;
-    unsigned idx = slot[0x98 / 4] & 15;
-    g_slotType[idx] = (unsigned char)slot[0];
-    if (slot[0] != 5) g_refMark[idx] = 0;                    // 5 = observer slot with a user in it
-    return g_refMark[idx];
-}
-void ref_stub(void);
-__asm__(".text\n_ref_stub:\n"
-        "pushl %ebx\n call _ref_flag\n addl $4, %esp\n"
-        "leal -0x34(%ebp), %ecx\n movl $0x461785, %edx\n call *%edx\n"
-        "movl $0x4917D0, %edx\n jmp *%edx\n");
-static void hook_referee(void) {
-    unsigned char *t = (unsigned char *)REF_PATCH;
-    if (IsBadReadPtr(t, 10) || memcmp(t, REF_ORIG, 10)) { logmsg("referee flag: code not recognised"); return; }
-    DWORD o; VirtualProtect(t, 10, PAGE_EXECUTE_READWRITE, &o);
-    t[0] = 0xE9; *(DWORD *)(t + 1) = (DWORD)ref_stub - (DWORD)(t + 5); memset(t + 5, 0x90, 5);
-    VirtualProtect(t, 10, o, &o); FlushInstructionCache(GetCurrentProcess(), t, 10);
-    logmsg("referee button restored for the host");
 }
 
 static void install(void) {
@@ -1005,7 +886,6 @@ static void install(void) {
     return;
 #endif
     hook_frame();
-    hook_referee();
     logmsg("hooked Invoke at %08X", HOOK_ADDR);
     static const unsigned char CHAT_PRO[5] = {0xB8, 0xD9, 0xEC, 0xF0, 0x00};   // mov eax, 0x00F0ECD9 @ 0x4023DC
     unsigned char *ct = (unsigned char *)FN_CHAT_SEND;
@@ -1070,7 +950,7 @@ BOOL WINAPI DllMain(HINSTANCE h, DWORD reason, LPVOID _) {
 #ifdef LITE
     logmsg("LobbyStats Lite v0.6.17");
 #else
-    logmsg("LobbyStats v0.6.20");
+    logmsg("LobbyStats v0.6.21");
 #endif
     if (already_loaded("LobbyStats")) { logmsg("another LobbyStats copy is already active in this game, this one stays idle"); return TRUE; }
     load_cache(); install();
