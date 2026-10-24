@@ -15,11 +15,11 @@ Install (Elite)
   Check: Elite_DLLs\LobbyStats.log should contain "hooked Invoke at 0045DB6C" and later "lookup N names".
   Only DOW2.exe 3.19 (current Steam build) is supported; on any other build the DLL does nothing and says so in the log.
 
-Host filter — two menus in Game Setup (v0.5)
+Host filter - two menus in Game Setup (v0.5)
   When you host, two extra drop-down lists appear under "Starting resources" (other players don't see them):
     Rating:            off / 1000+ / 2000+ / 2500+ / 1400- / 1000-
     Hours / win rate:  off / hours 1000+ / hours 1000- / win rate 45%+ / 45%- / 50%+
-    ("+" = at least, "-" = at most.) Any other numbers — with the !filter chat command; the menu then shows them,
+    ("+" = at least, "-" = at most.) Any other numbers - with the !filter chat command; the menu then shows them,
     e.g. "!filter 1700" -> the list shows "Rating 1700+".
   Pick a value and the filter is on: the bot writes the rules in lobby chat for everyone, re-checks players already
   in the lobby, and anyone outside the limits gets "[Bot] Name kicked by bot: min rating is 1600, yours is 1520"
@@ -28,7 +28,7 @@ Host filter — two menus in Game Setup (v0.5)
   to the General chat so the kicked player sees why (write anything in General once so the DLL learns that channel).
   If the lists cover something or don't show up: [UI] in LobbyStats.ini (FilterLists=0 turns them off).
 
-Host filter — or type it in the lobby chat (you must be the host). The sign can go before or after the number:
+Host filter - or type it in the lobby chat (you must be the host). The sign can go before or after the number:
   !filter 1500+  (or 1500, +1500)  rating at least 1500      !filter 1500-  (or -1500)  rating at most 1500
   !filter h1000+ / h1000-          Steam hours               !filter wr45+ / wr45-       win rate
   A new value replaces the old one for that parameter. The menu in Game Setup updates right away.

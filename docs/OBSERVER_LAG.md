@@ -15,8 +15,8 @@ The numbers come from FrameProbe, a small diagnostic DLL. It hooks `shark::updat
 | FPS, early game | 62 | 130 |
 | FPS, late game | 31 | 72 |
 | Game thread CPU | ~100% of one core | ~100% of one core |
-| Time in `ntdll` (heap alloc/free, locks) | **22%** | 3% |
-| Hot call chain `0x005F6E47 → 0x00AE68BE` (into Scaleform/GameInfo code) | **~38% of the frame** | not in the top |
+| Time in `ntdll` (heap alloc/free, locks) | 22% | 3% |
+| Hot call chain `0x005F6E47 → 0x00AE68BE` (into Scaleform/GameInfo code) | ~38% of the frame | not in the top |
 
 Both are CPU-bound on a single thread. In live spectating, more than a third of every frame goes into one call chain, and most of that time is spent allocating and freeing memory.
 
@@ -57,9 +57,9 @@ It answers "am I an observer, and is this unit an ally or an enemy?". The game a
 
 ### Why only observers, why only live, why it scales
 
-- **Players skip the expensive branch.** They have their own player entity (`+0x174 != 0`).
-- **Replays skip it too.** The session is not online (`& 0x558 == 0`), so the function returns 0 immediately.
-- **Live observers hit it dozens of times per frame.** Each call copies every slot, so the cost grows with the number of players and stations, and with how often the per-unit query runs (more units means more calls).
+- Players skip the expensive branch. They have their own player entity (`+0x174 != 0`).
+- Replays skip it too. The session is not online (`& 0x558 == 0`), so the function returns 0 immediately.
+- Live observers hit it dozens of times per frame. Each call copies every slot, so the cost grows with the number of players and stations, and with how often the per-unit query runs (more units means more calls).
 
 ## Fix: ObsFix.dll
 

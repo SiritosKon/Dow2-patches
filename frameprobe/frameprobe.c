@@ -1,4 +1,4 @@
-// FrameProbe.dll — sampling profiler for DOW2.exe (to find out why observer mode lags).
+// FrameProbe.dll - sampling profiler for DOW2.exe (to find out why observer mode lags).
 //
 // Loaded like the other Elite DLLs (InjectedFiles in Elite.launchconfig). Starting 15 s after launch,
 // every ~2 ms it briefly suspends the game threads, records where they are (EIP) and the return addresses
@@ -23,7 +23,7 @@
 
 typedef struct { DWORD addr, count; } Slot;
 static Slot g_excl[HASH_SIZE], g_incl[HASH_SIZE], g_excl2[HASH_SIZE], g_incl2[HASH_SIZE];
-static DWORD g_mainSamples, g_samples2, g_tid2, g_nextTid2;   // 2 — the busiest thread after the main one
+static DWORD g_mainSamples, g_samples2, g_tid2, g_nextTid2;   // 2 - the busiest thread after the main one
 typedef struct { DWORD tid; HANDLE h; DWORD start; ULONGLONG cpu0; DWORD samples; int alive; } Thr;
 static Thr g_thr[MAX_THREADS]; static int g_nthr;
 static wchar_t g_log[MAX_PATH];
@@ -110,11 +110,11 @@ static void refresh_threads(void) {
     CloseHandle(s);
 }
 // ---------- exact counters: hooking the DOW2.exe 3.19 import table (game code is not modified) ----------
-#define IAT_SHARK_UPDATE 0x00F88068   // shark::update(float dt) — exactly once per frame
-#define IAT_SIM_PRE      0x00F88154   // World::SimulatePre  (__thiscall) — start of a simulation tick
-#define IAT_SIM_POST     0x00F88100   // World::SimulatePost (__thiscall) — end of tick
-#define IAT_GAMETICKS    0x00F885C4   // SimDebug::GetGameTicks() — game tick number
-#define IAT_TRACEF       0x00F87074   // dbInternal::TimeStampedTracef(fmt, ...) — game debug output (Debug.dll)
+#define IAT_SHARK_UPDATE 0x00F88068   // shark::update(float dt) - exactly once per frame
+#define IAT_SIM_PRE      0x00F88154   // World::SimulatePre  (__thiscall) - start of a simulation tick
+#define IAT_SIM_POST     0x00F88100   // World::SimulatePost (__thiscall) - end of tick
+#define IAT_GAMETICKS    0x00F885C4   // SimDebug::GetGameTicks() - game tick number
+#define IAT_TRACEF       0x00F87074   // dbInternal::TimeStampedTracef(fmt, ...) - game debug output (Debug.dll)
 typedef void (__stdcall *UpdFn)(float);
 typedef void (__fastcall *ThisFn)(void *, void *);
 typedef long (__stdcall *TicksFn)(void);
@@ -155,7 +155,7 @@ static int iat_hook(DWORD slot, const char *dll, void *fn, void **orig) {
     if (!m || !GetModuleInformation(GetCurrentProcess(), m, &mi, sizeof mi) || IsBadReadPtr((void *)slot, 4)) return 0;
     DWORD cur = *(DWORD *)slot;
     if (cur < (DWORD)mi.lpBaseOfDll || cur >= (DWORD)mi.lpBaseOfDll + mi.SizeOfImage) {
-        // slot already hooked by another DLL (e.g. LobbyStats) — chain onto it if it points to executable code
+        // slot already hooked by another DLL (e.g. LobbyStats) - chain onto it if it points to executable code
         MEMORY_BASIC_INFORMATION mb;
         if (!VirtualQuery((void *)cur, &mb, sizeof mb) || !(mb.Protect & (PAGE_EXECUTE | PAGE_EXECUTE_READ | PAGE_EXECUTE_READWRITE))) return 0;
         HMODULE exe = GetModuleHandleA(NULL); MODULEINFO me;               // but only inside the game itself (DOW2.exe)
@@ -180,7 +180,7 @@ static int trace_wanted(const char *f) {
 }
 static void __cdecl hk_trace(const char *fmt, ...) {
     va_list a; va_start(a, fmt);
-    if (!trace_wanted(fmt)) {                                   // not ours — pass it to the game as is
+    if (!trace_wanted(fmt)) {                                   // not ours - pass it to the game as is
         char pass[1024]; int pn = _vsnprintf(pass, sizeof pass - 1, fmt, a); va_end(a);
         if (pn < 0 || pn > (int)sizeof pass - 1) pn = sizeof pass - 1; pass[pn] = 0;
         o_trace("%s", pass); return;
@@ -195,7 +195,7 @@ static void __cdecl hk_trace(const char *fmt, ...) {
             g_tbytes += fprintf(f, "%02d:%02d:%02d.%03d [%lu] %s\n", t.wHour, t.wMinute, t.wSecond, t.wMilliseconds, GetCurrentThreadId(), buf); fclose(f); }
         LeaveCriticalSection(&g_tcs);
     }
-    o_trace("%s", buf);                                         // to the game — the same line, already formatted
+    o_trace("%s", buf);                                         // to the game - the same line, already formatted
 }
 // ---------- Continue button on the results screen: what the game sees at the moment of the click ----------
 #define FN_ONCLICKNEXT 0x00480A71                   // PostGameStatsForm::OnClickNext (__fastcall, ecx = form)
@@ -212,7 +212,7 @@ static void tlog(const char *fmt, ...) {
     if (f) { SYSTEMTIME t; GetLocalTime(&t); fprintf(f, "%02d:%02d:%02d.%03d [FrameProbe] %s\n", t.wHour, t.wMinute, t.wSecond, t.wMilliseconds, buf); fclose(f); }
     LeaveCriticalSection(&g_tcs);
 }
-// checked memory reads only: calling match object functions is not allowed — after a replay there is no match, and the game crashed (v7)
+// checked memory reads only: calling match object functions is not allowed - after a replay there is no match, and the game crashed (v7)
 static int rd_ok(const void *p, int n) { return p && !IsBadReadPtr(p, n); }
 void __stdcall on_click_next(unsigned char *form) {
     tlog("OnClickNext: clicked, form=%p", form);
@@ -316,7 +316,7 @@ static void report(DWORD mainTid, DWORD ms) {
     plog("main thread hottest (including callees, return addresses):\n");
     for (int i = 0; i < n && i < 80; i++) { char s[64]; fmt_addr(tmp[i].addr, s, sizeof s); plog("  %5.1f%%  %s\n", tmp[i].count * 100.0 / g_mainSamples, s); }
     if (g_samples2) {
-        plog("second busiest thread %lu, samples %lu — hottest (self):\n", g_tid2, g_samples2);
+        plog("second busiest thread %lu, samples %lu - hottest (self):\n", g_tid2, g_samples2);
         n = 0; for (int i = 0; i < HASH_SIZE; i++) if (g_excl2[i].addr) tmp[n++] = g_excl2[i];
         qsort(tmp, n, sizeof(Slot), cmp_slot);
         for (int i = 0; i < n && i < 25; i++) { char s[64]; fmt_addr(tmp[i].addr, s, sizeof s); plog("  %5.1f%%  %s\n", tmp[i].count * 100.0 / g_samples2, s); }
@@ -338,7 +338,7 @@ static DWORD WINAPI sampler(LPVOID _) {
     plog("FrameProbe v9\n");
     plog("options: observer logs %s, Continue logs %s\n", g_optObserver ? "on" : "off", g_optContinue ? "on" : "off");
     if (!g_optObserver) return 0;                              // without observer measurements the sampler is not needed
-    int sampler = GetPrivateProfileIntW(L"Probe", L"Sampler", 1, ini);   // 0 — frame counters only, the game thread is not suspended
+    int sampler = GetPrivateProfileIntW(L"Probe", L"Sampler", 1, ini);   // 0 - frame counters only, the game thread is not suspended
     plog("sampler: %s\n", sampler ? "on, every 20 ms" : "off");
     plog("FrameProbe started: %d modules, %d threads\n", g_nmods, g_nthr);
     static unsigned char stack[STACK_BYTES];
@@ -355,7 +355,7 @@ static DWORD WINAPI sampler(LPVOID _) {
             if (SuspendThread(t->h) == (DWORD)-1) continue;
             SIZE_T got = 0; int ok = GetThreadContext(t->h, &c);
             if (ok) ReadProcessMemory(GetCurrentProcess(), (void *)c.Esp, stack, STACK_BYTES, &got);
-            ResumeThread(t->h);                       // from here on — without the suspended thread
+            ResumeThread(t->h);                       // from here on - without the suspended thread
             if (!ok) continue;
             Slot *ex = second ? g_excl2 : g_excl, *in = second ? g_incl2 : g_incl;
             if (second) g_samples2++; else g_mainSamples++;

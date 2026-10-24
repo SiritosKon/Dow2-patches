@@ -1,21 +1,36 @@
-# DoW2 Retribution / Elite: client-side fixes and tools (source)
+# Dow2-patches
 
-All of these are small 32-bit DLLs for DOW2.exe 3.19.1.10320 (current Steam build), written in plain C
-and built with MinGW. They are loaded through Elite's DLL injector (`Elite_DLLs` + `InjectedFiles=` in
-`Elite.launchconfig`). Each one checks the exact bytes it patches and does nothing on another game build.
+Small DLL patches for Dawn of War II: Retribution (DOW2.exe 3.19.1.10320, the current Steam build).
+Plain C, built with MinGW. Every patch checks the bytes it is about to change and does nothing if the
+exe is a different build.
 
-Build everything: `make` (needs `gcc-mingw-w64-i686`). GitHub Actions builds every push; tagged releases (`v*`) attach the DLLs and their SHA-256.
+    make                          # all DLLs into build/
+    make STATS_HOST=your.host     # same, with the stats host baked into LobbyStats
 
-| Folder | What | Build |
-|---|---|---|
-| `obsfix/` | **Observer lag fix.** Caches the observer's "which slot am I" lookup, which rebuilt the whole match info dozens of times per frame. See [docs/OBSERVER_LAG.md](docs/OBSERVER_LAG.md). | `i686-w64-mingw32-gcc -O2 -shared -o ObsFix.dll obsfix.c -static-libgcc` |
-| `lobbystats/` | **Lobby stats.** Relic rating next to names and a stats tooltip. The full build also has an optional host filter and kick. Lite build = tooltip + rating only. | full: `i686-w64-mingw32-gcc -O2 -shared -o LobbyStats.dll lobbystats.c -lwinhttp -lpsapi -static-libgcc -Wl,--kill-at` — lite: add `-DLITE` |
-| `vanilla-loader/` | `winmm.dll` loader for vanilla (no Elite): forwards all 193 winmm exports to the system DLL and loads every `*.dll` from `<game>\dow2-patches\` (ObsFix, LobbyStats, ...). Does nothing when `-modname` is on the command line (Elite loads its own DLLs). | `i686-w64-mingw32-gcc -O2 -shared -o winmm.dll winmm_proxy.c winmm.def -static-libgcc` |
-| `frameprobe/` | **Diagnostics** used to find the observer lag: frame times, sim ticks, a stack sampler of the game-loop thread, a Continue-button probe. | `i686-w64-mingw32-gcc -O2 -shared -o FrameProbe.dll frameprobe.c -lpsapi -lwinmm -static-libgcc` |
+Needs gcc-mingw-w64-i686. CI builds every push, tags (v*) get the DLLs attached to a release.
 
-The launcher (Rust/Tauri, MIT) lives in its own repository, `elite-launcher`.
+obsfix/
+    Observer lag fix. When you spectate a live game the client asks "which slot am I in" dozens of times
+    per frame, and every time it rebuilds the whole match info from the network session. ObsFix caches
+    the answer for 500 ms. Write-up with addresses: docs/OBSERVER_LAG.md
 
-LobbyStats reads ratings from a small web service that reads the public Relic API. Its host is set at
-build time (`make STATS_HOST=your.host`) or in `LobbyStats.ini` (`[LobbyStats] Server=your.host`). It runs in a background thread over plain HTTP and never touches the game's netcode or stat reporting.
+lobbystats/
+    Relic rating next to player names in the lobby, plus a tooltip with win rate, games and Steam hours.
+    The full build also has an optional host filter (!filter in lobby chat, two dropdowns in Game Setup).
+    -DLITE builds only the rating/tooltip part. Data comes from a small web service that reads the public
+    Relic API (host: STATS_HOST at build time, or Server= in LobbyStats.ini). It runs in its own thread
+    and doesn't touch the game's netcode.
 
-License: MIT. Author: pivolan.
+vanilla-loader/
+    winmm.dll for the game without Elite. Forwards everything to the real winmm.dll and loads every
+    *.dll from <game>\dow2-patches\. Does nothing when -modname is on the command line, since Elite
+    loads its own DLLs.
+
+frameprobe/
+    The diagnostics DLL I used to find the observer lag: frame times, sim ticks, a stack sampler on the
+    game thread, a probe on the post-game Continue button.
+
+Installing with Elite: put the DLL into Elite_DLLs\ and add it to InjectedFiles= in Elite.launchconfig.
+Without Elite: winmm.dll next to DOW2.exe, patches into dow2-patches\.
+
+MIT.

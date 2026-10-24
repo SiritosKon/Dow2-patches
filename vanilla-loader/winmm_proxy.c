@@ -1,6 +1,6 @@
-// winmm.dll — shim for VANILLA DoW2: Retribution. All calls are forwarded to the system winmm.dll,
+// winmm.dll - shim for VANILLA DoW2: Retribution. All calls are forwarded to the system winmm.dll,
 // and when launched without -modname (vanilla) it additionally loads every patch DLL from <game>\dow2-patches\ (and the older LobbyStats\LobbyStats.dll).
-// Game files are not modified: Steam leaves an extra file in the folder alone. In Elite (-modname present) the shim loads nothing —
+// Game files are not modified: Steam leaves an extra file in the folder alone. In Elite (-modname present) the shim loads nothing -
 // there Elite loads its patch DLLs itself.
 #include <windows.h>
 #include <string.h>

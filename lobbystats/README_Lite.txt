@@ -1,4 +1,4 @@
-LobbyStats Lite v0.6.17 — Relic rating next to names and a stats tooltip in the Dawn of War II: Retribution lobby. Nothing else.
+LobbyStats Lite v0.6.17 - Relic rating next to names and a stats tooltip in the Dawn of War II: Retribution lobby. Nothing else.
 
 Hover a player slot in the lobby: Relic rating, win rate (wins / losses), games, Steam hours.
 No host filter, no kicks, no chat commands, no new menus.
