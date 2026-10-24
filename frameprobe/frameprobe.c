@@ -1,12 +1,12 @@
-// FrameProbe.dll — сэмплирующий профайлер для DOW2.exe (ищем, почему тормозит режим обсервера).
+// FrameProbe.dll — sampling profiler for DOW2.exe (to find out why observer mode lags).
 //
-// Подключается как остальные DLL Elite (InjectedFiles в Elite.launchconfig). Через 15 с после старта
-// каждые ~2 мс на миг останавливает потоки игры, запоминает, где они стоят (EIP) и адреса возврата
-// в стеке, и раз в 10 с пишет в FrameProbe.log:
-//   - загрузку каждого потока (сколько процентов одного ядра он съел) и где он начался;
-//   - самые горячие адреса главного потока (окно игры): «сам» (EIP) и «включая вызовы» (адреса возврата);
-//   - разбивку главного потока по модулям (DOW2.exe, d3d9, ntdll = ожидание и т.п.).
-// Адреса — модуль+смещение; функции по ним находим в Ghidra.
+// Loaded like the other Elite DLLs (InjectedFiles in Elite.launchconfig). Starting 15 s after launch,
+// every ~2 ms it briefly suspends the game threads, records where they are (EIP) and the return addresses
+// on the stack, and every 10 s writes to FrameProbe.log:
+//   - load of each thread (what percentage of one core it used) and where it started;
+//   - hottest addresses of the main thread (game window): "self" (EIP) and "including calls" (return addresses);
+//   - breakdown of the main thread by module (DOW2.exe, d3d9, ntdll = waiting, etc.).
+// Addresses are module+offset; the functions behind them are looked up in Ghidra.
 #include <windows.h>
 #include <tlhelp32.h>
 #include <psapi.h>
@@ -15,7 +15,7 @@
 #include <string.h>
 
 #define WINDOW_MS   10000
-#define PERIOD_MS   20   // 50 замеров в секунду: остановка игрового потока ~20 мкс, т.е. <0.1% его времени
+#define PERIOD_MS   20   // 50 samples per second: suspending the game thread takes ~20 us, i.e. <0.1% of its time
 #define MAX_THREADS 64
 #define STACK_BYTES 4096
 #define HASH_BITS   16
@@ -23,7 +23,7 @@
 
 typedef struct { DWORD addr, count; } Slot;
 static Slot g_excl[HASH_SIZE], g_incl[HASH_SIZE], g_excl2[HASH_SIZE], g_incl2[HASH_SIZE];
-static DWORD g_mainSamples, g_samples2, g_tid2, g_nextTid2;   // 2 — самый загруженный поток после главного
+static DWORD g_mainSamples, g_samples2, g_tid2, g_nextTid2;   // 2 — the busiest thread after the main one
 typedef struct { DWORD tid; HANDLE h; DWORD start; ULONGLONG cpu0; DWORD samples; int alive; } Thr;
 static Thr g_thr[MAX_THREADS]; static int g_nthr;
 static wchar_t g_log[MAX_PATH];
@@ -66,10 +66,10 @@ static int in_text(DWORD a) { for (int i = 0; i < g_nmods; i++) if (a >= g_mods[
 static void fmt_addr(DWORD a, char *o, int cap) {
     Mod *m = mod_of(a);
     if (!m) snprintf(o, cap, "%08lX", a);
-    else if (!_stricmp(m->name, "DOW2.exe")) snprintf(o, cap, "DOW2.exe!%08lX", a);       // exe без ASLR: адрес как в Ghidra
+    else if (!_stricmp(m->name, "DOW2.exe")) snprintf(o, cap, "DOW2.exe!%08lX", a);       // exe has no ASLR: address matches Ghidra
     else snprintf(o, cap, "%s+%lX", m->name, a - m->base);
 }
-// похоже ли значение со стека на адрес возврата (перед ним инструкция call)
+// does a stack value look like a return address (preceded by a call instruction)
 static int is_ret(DWORD r) {
     if (!in_text(r)) return 0;
     unsigned char b[7];
@@ -109,12 +109,12 @@ static void refresh_threads(void) {
     }
     CloseHandle(s);
 }
-// ---------- точные счётчики: перехват таблицы импорта DOW2.exe 3.19 (код игры не меняется) ----------
-#define IAT_SHARK_UPDATE 0x00F88068   // shark::update(float dt) — ровно раз в кадр
-#define IAT_SIM_PRE      0x00F88154   // World::SimulatePre  (__thiscall) — начало тика симуляции
-#define IAT_SIM_POST     0x00F88100   // World::SimulatePost (__thiscall) — конец тика
-#define IAT_GAMETICKS    0x00F885C4   // SimDebug::GetGameTicks() — номер игрового тика
-#define IAT_TRACEF       0x00F87074   // dbInternal::TimeStampedTracef(fmt, ...) — отладочный вывод игры (Debug.dll)
+// ---------- exact counters: hooking the DOW2.exe 3.19 import table (game code is not modified) ----------
+#define IAT_SHARK_UPDATE 0x00F88068   // shark::update(float dt) — exactly once per frame
+#define IAT_SIM_PRE      0x00F88154   // World::SimulatePre  (__thiscall) — start of a simulation tick
+#define IAT_SIM_POST     0x00F88100   // World::SimulatePost (__thiscall) — end of tick
+#define IAT_GAMETICKS    0x00F885C4   // SimDebug::GetGameTicks() — game tick number
+#define IAT_TRACEF       0x00F87074   // dbInternal::TimeStampedTracef(fmt, ...) — game debug output (Debug.dll)
 typedef void (__stdcall *UpdFn)(float);
 typedef void (__fastcall *ThisFn)(void *, void *);
 typedef long (__stdcall *TicksFn)(void);
@@ -122,8 +122,8 @@ static UpdFn o_upd; static ThisFn o_pre, o_post; static TicksFn f_ticks;
 static CRITICAL_SECTION g_cs; static LARGE_INTEGER g_qf;
 static struct { LONG frames, ticks, maxTicksFrame, ticksFrame, hist[6]; double ftSum, ftMax, simSum, simMax, dtSum; LONGLONG lastQ, preQ; } C;
 static double ms_since(LONGLONG q0, LONGLONG q1) { return (q1 - q0) * 1000.0 / g_qf.QuadPart; }
-static volatile LONG g_ticksNow;                            // номер игрового тика, читается в главном потоке
-static volatile DWORD g_gameTid;                            // поток, который рисует кадры (игровой цикл), а не поток окна
+static volatile LONG g_ticksNow;                            // game tick number, read on the main thread
+static volatile DWORD g_gameTid;                            // the thread that renders frames (game loop), not the window thread
 static void __stdcall hk_update(float dt) {
     LARGE_INTEGER q; QueryPerformanceCounter(&q);
     if (!g_gameTid) g_gameTid = GetCurrentThreadId();
@@ -155,10 +155,10 @@ static int iat_hook(DWORD slot, const char *dll, void *fn, void **orig) {
     if (!m || !GetModuleInformation(GetCurrentProcess(), m, &mi, sizeof mi) || IsBadReadPtr((void *)slot, 4)) return 0;
     DWORD cur = *(DWORD *)slot;
     if (cur < (DWORD)mi.lpBaseOfDll || cur >= (DWORD)mi.lpBaseOfDll + mi.SizeOfImage) {
-        // слот уже перехвачен другой DLL (например LobbyStats) — встаём цепочкой, если там исполняемый код
+        // slot already hooked by another DLL (e.g. LobbyStats) — chain onto it if it points to executable code
         MEMORY_BASIC_INFORMATION mb;
         if (!VirtualQuery((void *)cur, &mb, sizeof mb) || !(mb.Protect & (PAGE_EXECUTE | PAGE_EXECUTE_READ | PAGE_EXECUTE_READWRITE))) return 0;
-        HMODULE exe = GetModuleHandleA(NULL); MODULEINFO me;               // но только в самой игре (DOW2.exe)
+        HMODULE exe = GetModuleHandleA(NULL); MODULEINFO me;               // but only inside the game itself (DOW2.exe)
         if (!GetModuleInformation(GetCurrentProcess(), exe, &me, sizeof me) || slot < (DWORD)me.lpBaseOfDll || slot >= (DWORD)me.lpBaseOfDll + me.SizeOfImage) return 0;
         char nm[MAX_PATH]; GetModuleFileNameA(exe, nm, MAX_PATH); if (!strstr(nm, "DOW2") && !strstr(nm, "dow2")) return 0;
     }
@@ -167,11 +167,11 @@ static int iat_hook(DWORD slot, const char *dll, void *fn, void **orig) {
     VirtualProtect((void *)slot, 4, old, &old);
     return 1;
 }
-// Копия отладочного вывода игры в FrameProbe_trace.log: PartyProgresser / PostGameStatsForm (кнопка Continue),
-// сообщения сети и синхронизации (обсервер). Ограничение 30 МБ.
+// Copy of the game's debug output to FrameProbe_trace.log: PartyProgresser / PostGameStatsForm (Continue button),
+// network and sync messages (observer). Limit 30 MB.
 typedef void (__cdecl *TraceFn)(const char *, ...);
 static TraceFn o_trace; static CRITICAL_SECTION g_tcs; static wchar_t g_tlog[MAX_PATH]; static LONG g_tbytes;
-// форматируем только нужные строки (пати/Continue/сессия/вход): разбирать каждую отладочную строку игры рискованно
+// format only the lines we need (party/Continue/session/login): parsing every game debug line is risky
 static int trace_wanted(const char *f) {
     static const char *keys[] = {"Party", "PostGame", "Postgame", "Continue", "Transition", "Session", "Join", "Advertis", "Lobby", "%s", NULL};
     if (!f) return 0;
@@ -180,7 +180,7 @@ static int trace_wanted(const char *f) {
 }
 static void __cdecl hk_trace(const char *fmt, ...) {
     va_list a; va_start(a, fmt);
-    if (!trace_wanted(fmt)) {                                   // не наше — просто отдать игре как есть
+    if (!trace_wanted(fmt)) {                                   // not ours — pass it to the game as is
         char pass[1024]; int pn = _vsnprintf(pass, sizeof pass - 1, fmt, a); va_end(a);
         if (pn < 0 || pn > (int)sizeof pass - 1) pn = sizeof pass - 1; pass[pn] = 0;
         o_trace("%s", pass); return;
@@ -195,16 +195,16 @@ static void __cdecl hk_trace(const char *fmt, ...) {
             g_tbytes += fprintf(f, "%02d:%02d:%02d.%03d [%lu] %s\n", t.wHour, t.wMinute, t.wSecond, t.wMilliseconds, GetCurrentThreadId(), buf); fclose(f); }
         LeaveCriticalSection(&g_tcs);
     }
-    o_trace("%s", buf);                                         // игре — та же строка, уже отформатированная
+    o_trace("%s", buf);                                         // to the game — the same line, already formatted
 }
-// ---------- кнопка Continue на экране итогов: что видит игра в момент нажатия ----------
-#define FN_ONCLICKNEXT 0x00480A71                   // PostGameStatsForm::OnClickNext (__fastcall, ecx = форма)
+// ---------- Continue button on the results screen: what the game sees at the moment of the click ----------
+#define FN_ONCLICKNEXT 0x00480A71                   // PostGameStatsForm::OnClickNext (__fastcall, ecx = form)
 static const unsigned char NEXT_PRO[6] = {0x55, 0x8B, 0xEC, 0x83, 0xE4, 0xF8};
 #define G_SESSION_PTR  0x01335014
 #define G_SETTINGS_PTR 0x01335A78
 typedef char  (__fastcall *BoolVFn)(void *self, void *edx);
 typedef void *(__fastcall *PtrVFn)(void *self, void *edx);
-void *g_nextTramp;                                   // используется из asm-заглушки
+void *g_nextTramp;                                   // used from the asm stub
 static void tlog(const char *fmt, ...) {
     char buf[600]; va_list a; va_start(a, fmt); _vsnprintf(buf, sizeof buf - 1, fmt, a); va_end(a); buf[sizeof buf - 1] = 0;
     EnterCriticalSection(&g_tcs);
@@ -212,7 +212,7 @@ static void tlog(const char *fmt, ...) {
     if (f) { SYSTEMTIME t; GetLocalTime(&t); fprintf(f, "%02d:%02d:%02d.%03d [FrameProbe] %s\n", t.wHour, t.wMinute, t.wSecond, t.wMilliseconds, buf); fclose(f); }
     LeaveCriticalSection(&g_tcs);
 }
-// только чтение памяти с проверкой: вызывать функции объекта матча нельзя — после реплея матча нет, и игра падала (v7)
+// checked memory reads only: calling match object functions is not allowed — after a replay there is no match, and the game crashed (v7)
 static int rd_ok(const void *p, int n) { return p && !IsBadReadPtr(p, n); }
 void __stdcall on_click_next(unsigned char *form) {
     tlog("OnClickNext: clicked, form=%p", form);
@@ -251,11 +251,11 @@ static void install_counters(void) {
     }
     InitializeCriticalSection(&g_tcs);
     wcscpy(g_tlog, g_log); wchar_t *dot = wcsrchr(g_tlog, L'.'); if (dot) wcscpy(dot, L"_trace.log");
-    // копию отладочного вывода игры больше не делаем: он и так в warnings.txt, а запись файла из сетевого потока его тормозила
+    // no longer copying the game's debug output: it is already in warnings.txt, and writing the file from the network thread slowed it down
     (void)hk_trace;
     if (g_optContinue) { g_hooks |= 8; install_next_hook(); }
     HMODULE se = GetModuleHandleA("SimEngine.dll");
-    // SimDebug::GetGameTicks больше не вызываем: вызов вне симуляции ронял игру на первом же отчёте (v5)
+    // SimDebug::GetGameTicks is no longer called: calling it outside the simulation crashed the game on the very first report (v5)
     if (0 && g_optObserver && se && !IsBadReadPtr((void *)IAT_GAMETICKS, 4)) {
         DWORD cur = *(DWORD *)IAT_GAMETICKS; MODULEINFO mi;
         if (GetModuleInformation(GetCurrentProcess(), se, &mi, sizeof mi) && cur >= (DWORD)mi.lpBaseOfDll && cur < (DWORD)mi.lpBaseOfDll + mi.SizeOfImage) { f_ticks = (TicksFn)cur; g_hooks |= 4; }
@@ -297,7 +297,7 @@ static void report(DWORD mainTid, DWORD ms) {
         plog("  tid %6lu %5.1f%%  start %s%s\n", t->tid, pct, sa, t->tid == mainTid ? "   <- main (game window)" : "");
     }
     static Slot tmp[HASH_SIZE]; int n = 0;
-    // по модулям
+    // by module
     typedef struct { const char *name; DWORD c; } MC; MC mc[64]; int nmc = 0;
     for (int i = 0; i < HASH_SIZE; i++) if (g_excl[i].addr) {
         Mod *m = mod_of(g_excl[i].addr); const char *nm = m ? m->name : "?"; int j;
@@ -337,8 +337,8 @@ static DWORD WINAPI sampler(LPVOID _) {
     load_mods(); refresh_threads(); install_counters();
     plog("FrameProbe v9\n");
     plog("options: observer logs %s, Continue logs %s\n", g_optObserver ? "on" : "off", g_optContinue ? "on" : "off");
-    if (!g_optObserver) return 0;                              // без замеров обсервера сэмплер не нужен
-    int sampler = GetPrivateProfileIntW(L"Probe", L"Sampler", 1, ini);   // 0 — только счётчики кадров, игровой поток не останавливается
+    if (!g_optObserver) return 0;                              // without observer measurements the sampler is not needed
+    int sampler = GetPrivateProfileIntW(L"Probe", L"Sampler", 1, ini);   // 0 — frame counters only, the game thread is not suspended
     plog("sampler: %s\n", sampler ? "on, every 20 ms" : "off");
     plog("FrameProbe started: %d modules, %d threads\n", g_nmods, g_nthr);
     static unsigned char stack[STACK_BYTES];
@@ -349,13 +349,13 @@ static DWORD WINAPI sampler(LPVOID _) {
         if (now - lastRefresh > 1000) { refresh_threads(); lastRefresh = now; DWORD m = g_gameTid ? g_gameTid : main_tid(); if (m) mainTid = m; }
         if (now - t0 >= WINDOW_MS) { load_mods(); report(mainTid, now - t0); t0 = now; }
         for (int i = 0; sampler && i < g_nthr; i++) {
-            Thr *t = &g_thr[i]; if (!t->alive || t->tid != mainTid) continue;   // только главный поток: останавливать сетевой нельзя (рвёт соединение)
+            Thr *t = &g_thr[i]; if (!t->alive || t->tid != mainTid) continue;   // main thread only: suspending the network thread is not allowed (drops the connection)
             int second = t->tid != mainTid;
             CONTEXT c; c.ContextFlags = CONTEXT_CONTROL | CONTEXT_INTEGER;
             if (SuspendThread(t->h) == (DWORD)-1) continue;
             SIZE_T got = 0; int ok = GetThreadContext(t->h, &c);
             if (ok) ReadProcessMemory(GetCurrentProcess(), (void *)c.Esp, stack, STACK_BYTES, &got);
-            ResumeThread(t->h);                       // дальше — без остановленного потока
+            ResumeThread(t->h);                       // from here on — without the suspended thread
             if (!ok) continue;
             Slot *ex = second ? g_excl2 : g_excl, *in = second ? g_incl2 : g_incl;
             if (second) g_samples2++; else g_mainSamples++;

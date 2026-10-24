@@ -1,12 +1,12 @@
-// ObsFix.dll — тормоза обсервера в Dawn of War II: Retribution 3.19 (Elite).
+// ObsFix.dll — observer lag in Dawn of War II: Retribution 3.19 (Elite).
 //
-// Причина: FUN_00AE6850 («какой по счёту слот у локального игрока») в онлайне каждый раз строит полную копию
-// GameInfo матча (все слоты по 200 байт, строки, векторы) через сессию RLink, проходит по слотам и всё уничтожает.
-// Её зовёт FUN_00AE5E00 («я обсервер? свой/чужой») — у обсервера (нет своего игрока, +0x174 == 0) десятки раз за
-// кадр. В реплее (офлайн, флаг сессии & 0x558 == 0) функция сразу возвращает 0 — поэтому реплей не тормозит.
-// Замер (FrameProbe v9): у обса эта цепочка ~38% кадра, из них ~22% — выделение/освобождение памяти в ntdll.
+// Cause: FUN_00AE6850 ("which slot index the local player has") online builds a full copy of the match
+// GameInfo every time (all slots of 200 bytes, strings, vectors) via the RLink session, walks the slots and destroys it all.
+// It is called by FUN_00AE5E00 ("am I an observer? own/other") — for an observer (no own player, +0x174 == 0) dozens of times per
+// frame. In a replay (offline, session flag & 0x558 == 0) the function returns 0 immediately — that is why replays don't lag.
+// Measurement (FrameProbe v9): for an observer this chain is ~38% of the frame, of which ~22% is memory alloc/free in ntdll.
 //
-// Исправление: ответ запоминается на 500 мс (номер слота за матч не меняется). Игра получает то же значение.
+// Fix: the answer is cached for 500 ms (the slot number doesn't change during a match). The game gets the same value.
 #include <windows.h>
 #include <stdio.h>
 #include <string.h>
@@ -32,7 +32,7 @@ static int __cdecl slot_cached(void) {
     g_val = g_orig(); g_tick = now; g_have = 1;
     return g_val;
 }
-static DWORD WINAPI stats(LPVOID _) {                         // раз в минуту: сколько вызовов сэкономили
+static DWORD WINAPI stats(LPVOID _) {                         // once a minute: how many calls were saved
     for (;;) {
         Sleep(60000);
         LONG c = InterlockedExchange(&g_calls, 0), m = InterlockedExchange(&g_misses, 0);

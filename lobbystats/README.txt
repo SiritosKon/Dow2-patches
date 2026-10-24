@@ -53,25 +53,3 @@ Options (file Elite_DLLs\LobbyStats.ini, see comments inside)
      If the stats server is unreachable, nobody is kicked.
 
 Remove: delete LobbyStats.dll and remove it from InjectedFiles.
-
----------------------------------------------------------------------------------------------
-Русский
-
-Что делает: в лобби к нику игрока дописывается рейтинг Relic (PlayerName  [2087]); при наведении на слот —
-подсказка: рейтинг, доля побед (победы / поражения), число игр, часы в Steam.
-Цифры появляются при следующем обновлении лобби (кто-то зашёл, нажал «готов», сменил расу), дальше — сразу из кэша.
-
-Установка: скопировать LobbyStats.dll в папку игры Elite_DLLs\, в Elite.launchconfig дописать
-", LobbyStats.dll" в конец строки InjectedFiles, запустить Elite. Проверка — файл Elite_DLLs\LobbyStats.log.
-Только рейтинг во всплывающей подсказке, без изменения ников: файл LobbyStats.ini с [LobbyStats] ShowRatingInName=0.
-
-Фильтр хоста (v0.5): когда вы хост, под «Starting resources» появляются два списка — «Rating» и «Experience»
-(рейтинг от/до; игры, часы, винрейт, «только с профилем Relic»). Выбрали значение — фильтр включён, бот пишет правила
-в общий чат и кикает неподходящих через несколько секунд. Оба списка «off» — фильтр выключен. Другие игроки списков не видят.
-То же самое можно задать в чате лобби: !filter 1500-2400 wr55 g100 h750, !filter live (кикать), !filter test, !filter off, !filter.
-Бот отвечает в общий чат, перепроверяет тех, кто уже в лобби, и запоминает правила (LobbyStats.ini).
-LobbyGuard (по желанию хоста, по умолчанию выключен): секция [Guard] в LobbyStats.ini.
-Enabled=1 + DryRun=1 — бот только пишет в общий чат «[Bot test] Ник would be kicked: min rating is 1800, yours is 1520».
-DryRun=0 — пишет «[Bot] Ник kicked by bot: ...» и через KickDelaySeconds кикает. Работает, только когда хостите вы.
-Правила (v0.3): MinRating / MaxRating (рейтинг), MinWinRate / MaxWinRate (% побед), MinGames (игры), MinHours (часы Steam),
-KickUnknown (нет профиля Relic). Если сервер статистики недоступен — никого не кикает.

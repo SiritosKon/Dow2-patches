@@ -1,7 +1,7 @@
-// winmm.dll — прослойка для ВАНИЛЬНОЙ DoW2: Retribution. Все вызовы уходят в системную winmm.dll,
-// а при запуске без -modname (ваниль) дополнительно грузится LobbyStats\\LobbyStats.dll из папки игры.
-// Файлы игры не меняются: Steam лишний файл в папке не трогает. В Elite (есть -modname) прослойка ничего не грузит —
-// там LobbyStats подключает сам Elite.
+// winmm.dll — shim for VANILLA DoW2: Retribution. All calls are forwarded to the system winmm.dll,
+// and when launched without -modname (vanilla) it additionally loads LobbyStats\\LobbyStats.dll from the game folder.
+// Game files are not modified: Steam leaves an extra file in the folder alone. In Elite (-modname present) the shim loads nothing —
+// there Elite loads LobbyStats itself.
 #include <windows.h>
 #include <string.h>
 #define N 193
@@ -211,7 +211,7 @@ static int has_modname(void) {
 static DWORD WINAPI load_stats(LPVOID _) {
     wchar_t p[MAX_PATH]; GetModuleFileNameW(NULL, p, MAX_PATH);
     wchar_t *sl = wcsrchr(p, L'\\'); if (!sl) return 0;
-    if (_wcsicmp(sl + 1, L"DOW2.exe")) return 0;                     // только сама игра
+    if (_wcsicmp(sl + 1, L"DOW2.exe")) return 0;                     // only the game itself
     wcscpy(sl + 1, L"LobbyStats\\LobbyStats.dll");
     if (GetFileAttributesW(p) != INVALID_FILE_ATTRIBUTES) LoadLibraryW(p);
     return 0;
