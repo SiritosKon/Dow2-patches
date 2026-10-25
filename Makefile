@@ -6,7 +6,7 @@ OUT = build
 STATS_HOST ?=
 STATS = $(if $(STATS_HOST),-DSTATS_HOST='L"$(STATS_HOST)"',)
 
-all: $(OUT)/ObsFix.dll $(OUT)/LobbyStats.dll $(OUT)/LobbyStatsLite.dll $(OUT)/winmm.dll $(OUT)/FrameProbe.dll $(OUT)/ReinforceFix.dll
+all: $(OUT)/ObsFix.dll $(OUT)/LobbyStats.dll $(OUT)/winmm.dll $(OUT)/FrameProbe.dll $(OUT)/ReinforceFix.dll
 
 $(OUT):
 	mkdir -p $(OUT)
@@ -14,8 +14,6 @@ $(OUT)/ObsFix.dll: obsfix/obsfix.c | $(OUT)
 	$(CC) $(CFLAGS) -shared -o $@ $< -static-libgcc
 $(OUT)/LobbyStats.dll: lobbystats/lobbystats.c | $(OUT)
 	$(CC) $(CFLAGS) $(STATS) -shared -o $@ $< -lwinhttp -lpsapi -static-libgcc -Wl,--kill-at
-$(OUT)/LobbyStatsLite.dll: lobbystats/lobbystats.c | $(OUT)
-	$(CC) $(CFLAGS) -Wno-unused-variable -DLITE $(STATS) -shared -o $@ $< -lwinhttp -lpsapi -static-libgcc -Wl,--kill-at
 $(OUT)/winmm.dll: vanilla-loader/winmm_proxy.c vanilla-loader/winmm.def | $(OUT)
 	$(CC) -O2 -shared -o $@ $^ -static-libgcc
 $(OUT)/FrameProbe.dll: frameprobe/frameprobe.c | $(OUT)

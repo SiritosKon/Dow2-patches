@@ -16,10 +16,9 @@ obsfix/
 
 lobbystats/
     Relic rating next to player names in the lobby, plus a tooltip with win rate, games and Steam hours.
-    The full build also has an optional host filter (!filter in lobby chat, two dropdowns in Game Setup).
-    -DLITE builds only the rating/tooltip part. Data comes from a small web service that reads the public
-    Relic API (host: STATS_HOST at build time, or Server= in LobbyStats.ini). It runs in its own thread
-    and doesn't touch the game's netcode.
+    It only reads the lobby list: no kicking, no chat commands, no extra menus. Data comes from a small
+    web service that reads the public Relic API (host: STATS_HOST at build time, or Server= in
+    LobbyStats.ini). It runs in its own thread and doesn't touch the game's netcode.
 
 reinforcefix/
     Auto-reinforce is lost when a squad goes through an Eldar webway gate. The auto-reinforce list is
