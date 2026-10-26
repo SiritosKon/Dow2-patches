@@ -34,6 +34,11 @@ frameprobe/
     The diagnostics DLL I used to find the observer lag: frame times, sim ticks, a stack sampler on the
     game thread, a probe on the post-game Continue button.
 
+cgnumbers/
+    Control-group numbers above squads (experimental, skeleton). When you assign squads to a control
+    group (Ctrl+1..0) the group number is drawn on that squad's banner, handy in 2v2/3v3. Draws through
+    the game's Direct3D9 (DXVK-safe). Stage 1 proves the render path; reading squads/groups is stage 2.
+
 Installing with Elite: put the DLL into Elite_DLLs\ and add it to InjectedFiles= in Elite.launchconfig.
 Without Elite: winmm.dll next to DOW2.exe, patches into dow2-patches\.
 
