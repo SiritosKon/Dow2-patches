@@ -35,9 +35,15 @@ jobs:
   dlls:
     needs: version
     runs-on: ubuntu-24.04
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
-      - run: sudo apt-get update && sudo apt-get install -y gcc-mingw-w64-i686 make
+      - name: MinGW
+        run: |
+          # the man-db index rebuild after apt installs can take many minutes on these runners
+          sudo rm -f /var/lib/man-db/auto-update
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends gcc-mingw-w64-i686
       - run: make
       - run: cd build && sha256sum ./*.dll | tee SHA256SUMS.txt
       - uses: actions/upload-artifact@v4
