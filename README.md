@@ -7,7 +7,11 @@ exe is a different build.
     make                          # all DLLs into build/
     make STATS_HOST=your.host     # same, with the stats host baked into LobbyStats
 
-Needs gcc-mingw-w64-i686. CI builds every push, tags (v*) get the DLLs attached to a release.
+Needs gcc-mingw-w64-i686. CI builds every push and does a dry-run publish of the DLLs as a launcher add-on.
+
+Versions: the version of the set lives only in VERSION and needs an entry at the top of CHANGELOG.md. After a merge
+to main CI tags vX.Y.Z; for X.Y.0 it also publishes a GitHub Release with the DLLs and the CHANGELOG entries since the
+previous X.Y.0. Tags are set by CI, not by hand.
 
 obsfix/
     Observer lag fix. When you spectate a live game the client asks "which slot am I in" dozens of times

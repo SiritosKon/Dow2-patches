@@ -1,25 +1,145 @@
 name: build
 on:
   push:
-    branches: [main]
-    tags: ["v*"]
+    branches: ["**"]
   pull_request:
   workflow_dispatch:
 
+permissions:
+  contents: read
+
+concurrency:
+  group: build-${{ github.ref }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
+
 jobs:
+  version:
+    runs-on: ubuntu-24.04
+    outputs:
+      number: ${{ steps.version.outputs.number }}
+      tag: ${{ steps.version.outputs.tag }}
+      release: ${{ steps.version.outputs.release }}
+    steps:
+      - uses: actions/checkout@v4
+      - id: version
+        run: |
+          version="$(tr -d '[:space:]' < VERSION)"
+          python3 scripts/release_notes.py check "$version"
+          {
+            echo "number=$version"
+            echo "tag=v$version"
+            case "$version" in *.0) echo "release=true" ;; *) echo "release=false" ;; esac
+          } >> "$GITHUB_OUTPUT"
+          echo "Version **$version**" >> "$GITHUB_STEP_SUMMARY"
+
   dlls:
+    needs: version
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
       - run: sudo apt-get update && sudo apt-get install -y gcc-mingw-w64-i686 make
       - run: make
-      - run: sha256sum build/*.dll | tee build/SHA256SUMS.txt
+      - run: cd build && sha256sum ./*.dll | tee SHA256SUMS.txt
       - uses: actions/upload-artifact@v4
         with:
           name: dow2-fixes-dlls
           path: build/*
-      - name: Release on tag
-        if: startsWith(github.ref, 'refs/tags/v')
-        uses: softprops/action-gh-release@v2
+          retention-days: 7
+
+  # Everything a real upload of the add-ons to the launcher mirrors does, against a temporary store and a one-off key.
+  # The upload itself is skipped until the mirrors and the real signing key are available to CI.
+  publish:
+    needs: [version, dlls]
+    runs-on: ubuntu-22.04
+    env:
+      VERSION: ${{ needs.version.outputs.number }}
+    steps:
+      - name: Paths
+        run: |
+          {
+            echo "KEYS=$RUNNER_TEMP/keys"
+            echo "DIST=$RUNNER_TEMP/dist"
+            echo "STORE=$RUNNER_TEMP/store"
+          } >> "$GITHUB_ENV"
+      - uses: actions/checkout@v4
         with:
-          files: build/*
+          repository: pivolan/Dow2-elite-launcher
+          path: launcher
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: launcher
+      - uses: actions/download-artifact@v4
+        with:
+          name: dow2-fixes-dlls
+          path: ${{ runner.temp }}/dist
+      - name: One-off signing key
+        working-directory: launcher
+        run: |
+          cargo build -q -p elite-publish
+          ./target/debug/elite-publish keygen "$KEYS"
+          # the public key is compiled in: rebuild so that `verify` checks against the one-off key
+          cp "$KEYS/public.key" keys/public.key
+          cargo build -q -p elite-publish
+      - name: Publish into a temporary store
+        working-directory: launcher
+        run: |
+          ./target/debug/elite-publish version "$DIST" "$STORE" "dow2-patches-$VERSION" "$KEYS/private.key"
+          printf '{"schema":1,"components":[{"id":"dow2-patches","version":"dow2-patches-%s"}]}\n' "$VERSION" > "$STORE/launcher.json"
+          ./target/debug/elite-publish sign "$STORE/launcher.json" "$KEYS/private.key"
+          ./target/debug/elite-publish verify "$STORE"
+      - name: Summary
+        run: |
+          {
+            echo "### dow2-patches $VERSION: dry-run publish"
+            echo '```'
+            (cd "$DIST" && find . -type f -printf '%s\t%P\n' | awk -F'\t' '{printf "%8.1f KB  %s\n", $1/1e3, $2}')
+            echo '```'
+            echo "Store: $(find "$STORE/blobs" -type f | wc -l) blobs, $(du -sh "$STORE" | cut -f1); signatures OK."
+          } >> "$GITHUB_STEP_SUMMARY"
+      - name: Upload to the mirrors
+        run: |
+          echo "::notice::Upload to the mirrors skipped: no server access and no real signing key in CI yet"
+          echo "Upload to the mirrors: **skipped** (no server access yet)" >> "$GITHUB_STEP_SUMMARY"
+      - name: Clean up
+        if: always()
+        run: rm -rf "$KEYS" "$DIST" "$STORE" launcher
+
+  # After a merge to main: tag vX.Y.Z if it is new; for X.Y.0 also a GitHub Release with the DLLs.
+  release:
+    needs: [version, publish]
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    env:
+      TAG: ${{ needs.version.outputs.tag }}
+      VERSION: ${{ needs.version.outputs.number }}
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Tag
+        id: tag
+        run: |
+          if git rev-parse "$TAG" >/dev/null 2>&1; then
+            echo "$TAG already exists, nothing to do"
+            echo "new=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          git config user.name 'github-actions[bot]'
+          git config user.email 'github-actions[bot]@users.noreply.github.com'
+          git tag -a "$TAG" -m "$TAG"
+          git push origin "$TAG"
+          echo "new=true" >> "$GITHUB_OUTPUT"
+      - uses: actions/download-artifact@v4
+        if: steps.tag.outputs.new == 'true' && needs.version.outputs.release == 'true'
+        with:
+          name: dow2-fixes-dlls
+          path: dist
+      - name: GitHub Release
+        if: steps.tag.outputs.new == 'true' && needs.version.outputs.release == 'true'
+        run: |
+          python3 scripts/release_notes.py notes "$VERSION" > release-notes.md
+          gh release create "$TAG" dist/* --title "dow2-patches $VERSION" --notes-file release-notes.md --verify-tag
